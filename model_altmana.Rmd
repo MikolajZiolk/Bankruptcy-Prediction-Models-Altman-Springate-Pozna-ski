@@ -1,0 +1,595 @@
+---
+title: "Zad1_Model_Altmana"
+author: "Mikołaj Ziółkowski, Tomasz Sałapatek"
+date: today
+editor: visual
+format: 
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    toc-title: Spis Treści
+    number-sections: true
+    number-depth: 3
+    embed-resources: true
+    html-math-method: katex
+    code-tools: true
+    code-block-bg: true
+    code-fold: true
+    code-summary: "Show and hide code"
+    link-external-icon: true
+    link-external-newwindow: true
+    smooth-scroll: true
+    self-contained: true
+    fontsize: 1.0em
+    linestretch: 1.3
+    fig-align: center
+execute: 
+  echo: true
+  error: false
+  warning: false
+  output: true
+editor_options: 
+  chunk_output_type: console
+---
+
+<style type="text/css"> body {text-align: justify} </style>
+
+# Teoria:
+
+## Czym jest ryzyko kredytowe?
+
+Ryzyko kredytowe to rodzaj ryzyka finansowego, które odnosi się do możliwości niewywiązania się jednej ze stron z warunków umowy kredytowej. Dotyczy ono m.in. wiarygodności kredytowej oraz potencjalnego naruszenia warunków spłaty, a jego wpływ można mierzyć za pomocą różnych modeli, takich jak modele empiryczne, strukturalne czy zredukowane.
+
+## Idea liniowej analizy dyskryminacyjnej. Dlaczego można ją wykorzystać do analizy ryzyka kredytowego?
+
+Liniowa analiza dyskryminacyjna jest użyteczna w ocenie ryzyka kredytowego, ponieważ pozwala na klasyfikację klientów na podstawie ich cech, takich jak dochody czy historia kredytowa. Stara się maksymalizować różnice między grupami, co pomaga w lepszym rozdzieleniu klientów o różnym ryzyku. Dane często przyjmują rozkład normalny co pomaga LDA, bo to jest zakładane przy jej przeprowadzaniu.
+
+## Jaką ma postać, do czego służy i jakie ograniczenia ma model Altmana?
+
+**Zmienne:**<br> • X1 aktywa obrotowe / aktywa ogółem<br> • X2 zysk zatrzymany / aktywa ogółem<br> • X3 zysk przed spłatą odsetek i podatkiem / aktywa ogółem<br> • X4 wartość rynkowa kapitału akcyjnego / wartość księgowa zadłużenia<br> • X5 przychody ze sprzedaży / aktywa ogółem<br>
+
+**Postać:**<br> Z=1.2X1+1.4X2+3.3X3+0.6X4+0.99X5<br> <br> **Ograniczenia:**<br> • model jest liniowy, ciężko w sposób liniowy oddać złożoność procesu prowadzącego do bankructwa<br> • model jest prosty i bazuje na niewielkiej (5) liczbie zmiennych, dodatkowo zmienne mają stałe współczynniki co nie oddaje zmiany dynamiki na rynku.<br> • Nie uwzględnia czynników makroekonomicznych: Nie bierze pod uwagę zmiennych zewnętrznych, które mogą wpływać na sytuację finansową firmy. firmy są pomijane.<br>
+
+# Praktyka - model Altmana
+
+## Czyszczenie danych
+
+```{r}
+library(readxl)
+library(distr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+
+dane <- read_excel("C:/Users/mikol/OneDrive/Desktop/Modelowanie Ryzyka KiU//zad1/dane.xlsx")
+
+sum(is.na(dane)) 
+
+dane <- dane |>
+  mutate(across(where(is.character), ~as.numeric(.)))
+
+dane <- dane |> 
+  mutate(across(everything(), ~ifelse(is.na(.), mean(., na.rm = TRUE), .)))
+
+```
+
+Pobieramy dane o firmach, 65 zmiennych, 7027 wierszy. Występuje 89 wartości NULL, postanowaliśmy poradzić sobie z brakami w danych zastępując je średnimi wartościami w odpowiednich kolumnach. 
+
+## Losowy wybór firm
+
+```{r}
+set.seed(123)
+
+firmy_upadle <- dane |> 
+  filter(x65 == 1) |>  sample_n(100)
+
+firmy_przetrwaly <- dane |> 
+  filter(x65 == 0) |>  sample_n(100)
+
+dane_wybrane <- bind_rows(firmy_upadle, firmy_przetrwaly)
+```
+
+Do dalszej analizy wybieramy losowo 100 firm, które upadły i 100, które przetrwały kolejny rok działalności. Zmienna: 
+<br>
+- X65 == 1, firmy upadłe<br>
+- X65 == 0, firmy przetrwałe
+
+## Model Altmana
+
+```{r}
+dane_wybrane <- dane_wybrane |> 
+  mutate(Z = 1.2 * x3 + 1.4 * x6 + 3.3 * x7 + 0.6 * x8 + 0.99 * x9)
+
+dane_wybrane <- dane_wybrane |> 
+  mutate(predykcja = case_when(
+    Z > 3.0 ~ 0,   # Firma powinna przetrwać
+    Z < 1.8 ~ 1,   # bankructwo
+    TRUE ~ NA_real_  # Strefa szara - niepewność
+  ))
+
+```
+
+Tworzymy model Altmana według wzoru Z=1.2X1+1.4X2+3.3X3+0.6X4+0.99X5, oraz dopieramy odpowiednie zmienne do modelu, według kolejnośc:<br>
+
+• x3 = X1 aktywa obrotowe / aktywa ogółem<br> • x6 = X2 zysk zatrzymany / aktywa ogółem<br> • x7 = X3 zysk przed spłatą odsetek i podatkiem / aktywa ogółem<br> • x8 = X4 wartość rynkowa kapitału akcyjnego / wartość księgowa zadłużenia<br> • x9 = X5 przychody ze sprzedaży / aktywa ogółem<br>
+
+**Pierwsze 15 wartości Z**
+
+```{r}
+head(dane_wybrane$Z, 15)
+```
+
+**Interpretacja:**<br>
+
+Z \> 3.0 -\> bankructwo mało prawdopodobne<br> 1.8 \< Z \< 3.0 -\> szara strefa<br> Z \< 1.8 -\> bankructwo<br>
+
+**Pierwsze 15 wartości predykcji**
+
+```{r}
+head(dane_wybrane$predykcja, 15)
+```
+
+## Odsetek poprawnych oszacowań (dokładność modelu)
+
+```{r}
+dokladnosc <- mean(dane_wybrane$predykcja == dane_wybrane$x65, na.rm = TRUE)
+print(paste("Dokładność modelu Altmana:", round(dokladnosc * 100, 2), "%"))
+```
+
+Porównując uzyskane wyniki z rzeczywistą informacją o upadłości tych firm, można zauważyć, iż model jest dokładny w 59.6 %.
+
+## Błąd I rodzaju
+
+```{r}
+blad_I_rodzaju <- sum(dane_wybrane$predykcja == 0 & dane_wybrane$x65 == 1, na.rm = TRUE) /
+  sum(dane_wybrane$x65 == 1)
+print(paste("Błąd I rodzaju:", round(blad_I_rodzaju * 100, 2), "%"))
+```
+
+Błąd I rodzaju 43%: model przewidział przetrwanie, ale firma upadła.
+
+## Błąd II rodzaju
+
+```{r}
+blad_II_rodzaju <- sum(dane_wybrane$predykcja == 1 & dane_wybrane$x65 == 0, na.rm = TRUE) /
+  sum(dane_wybrane$x65 == 0)
+print(paste("Błąd II rodzaju:", round(blad_II_rodzaju * 100, 2), "%"))
+```
+
+Błąd II rodzaju 18%: model przewidział upadłość, ale firma przetrwała.
+
+## Wnioski
+
+Jakość predykcji modelu Altmana w tym przypadku jest umiarkowana, ponieważ dokładność wynosi zaledwie 59.6%.Wynik ten sugeruje, że model nie jest wystarczająco precyzyjny, aby samodzielnie wspierać decyzje o ryzyku upadłości.
+<br> 
+Błąd I rodzaju: 43%, wskazuje na problem, ponieważ oznacza, iż model nie może nie ostrzegać przed rzeczywistym przypadkiem brankructwa. Błąd I rodzaju (43%),który oznacza, że model często nie rozpoznaje firm rzeczywiście zagrożonych bankructwem, co stanowi poważne ryzyko z perspektywy zarządzania ryzykiem. Błąd II rodzaju (18%) wskazuje, że w części przypadków model błędnie klasyfikuje zdrowe firmy jako zagrożone, co może prowadzić do nieuzasadnionych reakcji. Podsumowując, model Altmana w obecnym zastosowaniu wymaga ostrożnej interpretacji i nie powinien być wykorzystywany jako jedyne narzędzie do oceny wypłacalności firm.
+
+## Czy oryginalny model jest skutecznym narzędziem do predykcji upadłości firm w przypadku rozważanych danych?
+
+Jak wykazano powyżej, model Altmana okazuje się w zasadzie nieskuteczny w analizowanym przypadku. Najprostszym wnioskiem, jaki można by wysnuć, jest to, że może po prostu jest przestarzały i niedostosowany do współczesnych realiów gospodarczych. <br>
+
+Jednak sięgając do źródeł takich jak np. [link](https://www.parkiet.com/inwestycje/art21604401-model-altmana-czyli-lupa-przez-ktora-mozna-wypatrzyc-kandydatow-na-bankrutow) można zauważyć, że model ten wciąż bywa uznawany za skuteczne narzędzie analizy finansowej. Może to sugerować, że problem nie leży w samym modelu, lecz w dostępnych danych -- a dokładniej w okresie, po którym sprawdzana jest upadłość firm.<br>
+
+Roczny horyzont czasowy może być zbyt krótki, aby w pełni uchwycić procesy finansowe prowadzące do bankructwa. Model Altmana bazuje na wskaźnikach, które często odzwierciedlają stopniowe pogarszanie się sytuacji firmy, a to może wymagać więcej czasu, by skutecznie prognozować upadłość.<br>
+
+Hipotezą tłumaczącą niską skuteczność modelu w tym przypadku jest to, że analizowany okres był zbyt krótki. Możliwe, że przy dłuższym horyzoncie czasowym model radziłby sobie lepiej i jego predykcje byłyby trafniejsze.
+
+
+# Model Springate’a
+## Dane ogólne
+Model Springate’a to empiryczny model predykcji bankructwa. Powstał jako modyfikacja klasycznego modelu Altmana, z wykorzystaniem analizy dyskryminacyjnej. Model bazuje na czterech wskaźnikach finansowych, opisujących rentowność, płynność oraz efektywność działalności firmy.
+<br>
+Model ma postać:
+<br>
+<br>
+Z = 1.03X1 + 3.07X2 + 0.66X3 + 0.4X4 
+<br>
+<br>
+, gdzie:<br>
+- X1 to kapitał pracujący / aktywa ogółem,<br>
+– X2 zysk przed spłatą odsetek i podatkiem / aktywa ogółem,<br>
+– X3 wynik brutto / zobowiązania krótkoterm, <br>
+– X4 przychody ze sprzedaży / aktywa ogółem
+<br>
+<br>
+Poniżej przedstawiamy jakie zmienne z naszego zbióru danych odwzorowują zmienne w modelu:
+<br>
+<br>
+- X1 = x3 (working capital / total assets) <br>
+- X2 = x7 (EBIT* / total assets)<br>
+- X3 = x12 (gross profit / short-term liabilities)<br>
+- X4 = x9 (sales / total assets)<br>
+<br>
+<br>
+*EBIT -> zysk przed odliczeniem podatków i odsetek
+
+Działamy na tych samym zbiorze (100firm upadłych i 100 przetrwałych) jak w modelu altmana.
+<br>
+Próg graniczny w modelu to 0.862, gdy Z>0.862 firma nie jest zagrożona upadłością, można zapisać:<br>
+- Z > 0.862 == firma przetrwa<br>
+- Z <= 0.862 == upadłość
+
+```{r}
+dane_wybraneSpr <- dane_wybrane |> 
+  mutate(Z_springate = 1.03 * x3 + 3.07 * x7 + 0.66 * x12 + 0.4 * x9)
+
+dane_wybraneSpr <- dane_wybraneSpr |> 
+  mutate(pred_springate = ifelse(Z_springate > 0.862, 0, 1))
+```
+
+## Dokładność
+
+```{r}
+dokladnosc_springate <- mean(dane_wybraneSpr$pred_springate == dane_wybraneSpr$x65, na.rm = TRUE)
+print(paste("Dokładność modelu Springate’a:", round(dokladnosc_springate * 100, 2), "%"))
+
+```
+
+## Błąd I rodzaju
+Przewidziano przetrwanie (0), ale firma upadła (x65 == 1)
+<br>
+
+```{r}
+blad_I_rodzaju_springate <- sum(dane_wybraneSpr$pred_springate == 0 & dane_wybraneSpr$x65 == 1, na.rm = TRUE) /
+  sum(dane_wybraneSpr$x65 == 1)
+print(paste("Błąd I rodzaju (Springate):", round(blad_I_rodzaju_springate * 100, 2), "%"))
+```
+
+## Błąd II rodzaju
+Przewidziano upadłość (1), ale firma przetrwała (x65 == 0)
+
+```{r}
+blad_II_rodzaju_springate <- sum(dane_wybraneSpr$pred_springate == 1 & dane_wybraneSpr$x65 == 0, na.rm = TRUE) /
+  sum(dane_wybraneSpr$x65 == 0)
+print(paste("Błąd II rodzaju (Springate):", round(blad_II_rodzaju_springate * 100, 2), "%"))
+```
+
+## Wniosek
+
+Model Springate’a osiągnął dokładność klasyfikacji na poziomie 60,5%, co wskazuje na umiarkowaną skuteczność w analizie upadłości firm w rozważanym zbiorze danych. Wynik ten oznacza, że model nieznacznie przewyższa losową klasyfikację, ale nie zapewnia wysokiej trafności predykcji.Szczególnie niepokojący jest wysoki błąd I rodzaju (53%), co oznacza, że w ponad połowie przypadków model błędnie uznał upadające firmy za zdrowe. Błąd II rodzaju (26%) , (błędne zaklasyfikowanie firm przetrwałych jako zagrożonych upadłością) jest niższy ale dalej niezadowalający świadczy o niskiej zdolności modelu do identyfikacji firm stabilnych finansowo.
+
+# Model Poznański
+## Dane ogólne
+Model ma postać:
+<br>
+<br>
+Z = 3,562X1 + 1,58X2 + 4,288X3 + 6,719X4 - 2,368
+<br>
+<br>
+, gdzie:
+<br>
+- X1 to rentowność aktywów
+<br>
+[(wynik finansowy netto) / (aktywa ogółem)] x 100% 
+<br>
+<br>
+- X2 to płynność szybka
+<br>
+[(aktywa obrotowe ogółem - zapasy) / (zobowiązania krótkoterminowe)] 
+<br>
+<br>
+- X3 to udział kapitału stalego w finansowaniu aktywów
+<br>
+[(kapitał własny + kapitały obce długoterminowe) / (aktywa ogółem)]
+<br>
+<br>
+- X4 to marża brutto na sprzedaży
+<br>
+[(zysk brutto ze sprzedaży) / (przychody netto ze sprzedaży)] x 100%
+<br>
+<br>
+- Wartość stała -2,368 
+<br>
+jest to wyraz wolny, szacunków statystycznych przy budowaniu modelu, pozwala na ustalenie granicznej wartości Z na poziomie zero.
+
+<br>
+Poniżej przedstawiamy jakie zmienne z naszych danych odpowiadają zmiennym z modelu:
+<br>
+<br>
+- X1 = x1 (net profit / total assets)<br>
+- X2 = x46 [(current assets - inventory) / short-term liabilities]<br>
+- X3* = udział kapitału stałego: X10 (equity / total assets) + (1 / X17) (czyli odwrotność total assets / total liabilities)<br>
+- X4 = x19 (gross profit / sales)
+<br>
+<br>
+*obliczamy x3(brak informacji o kapitałach obcych), zamiast :[(kapitał własny + kapitały obce długoterminowe) / (aktywa ogółem)] , zapisujemy: [(equity + total liabilities) / (total assets)] , gdzie total liabilities oznacza pasywa ogółem a nie kapitały obce długoterminowe.
+<br>
+
+**Interpretacja modelu**
+<br>
+- Z = 0 wartość krytyczna modelu<br>
+- Z ≤ 0 "bankruci"<br>
+- Z > 0 "firma przetrwała"
+<br>
+<br>
+Im wyższa wartość funkcji (powyżej 0,1 i wyższa), tym lepsza sytuacja finansowa przedsiębiorstwa i mniejsze zagrożenie bankructwem (w ciągu najbliższego roku).
+
+```{r}
+dane_wybranePoz <- dane_wybrane |> 
+  mutate(
+    X3_poznan = x10 + (1 / x17),
+    Z_poznan = 3.562 * x1 + 1.58 * x46 + 4.288 * X3_poznan + 6.719 * x19 - 2.368,
+    pred_poznan = ifelse(Z_poznan > 0, 1, 0)
+  )
+
+```
+
+## Dokładność modelu
+
+```{r}
+dokladnosc_poznan <- mean(dane_wybranePoz$pred_poznan == dane_wybranePoz$x65, na.rm = TRUE)
+print(paste("Dokładność modelu Poznańskiego:", round(dokladnosc_poznan * 100, 2), "%"))
+```
+
+## Błąd I rodzaju
+
+```{r}
+blad_I_rodzaju_poznan <- sum(dane_wybranePoz$pred_poznan == 0 & dane_wybranePoz$x65 == 1, na.rm = TRUE) /
+  sum(dane_wybranePoz$x65 == 0)
+print(paste("Błąd I rodzaju (Poznański):", round(blad_I_rodzaju_poznan * 100, 2), "%"))
+```
+
+## Błąd II rodzaju
+
+```{r}
+blad_II_rodzaju_poznan <- sum(dane_wybranePoz$pred_poznan == 1 & dane_wybranePoz$x65 == 0, na.rm = TRUE) /
+  sum(dane_wybranePoz$x65 == 0)
+print(paste("Błąd II rodzaju (Poznański):", round(blad_II_rodzaju_poznan * 100, 2), "%"))
+```
+
+## Wnioski
+
+Model Poznańskiego uzyskał bardzo niską dokładność klasyfikacji (47,5%), co świadczy o jego nieskuteczności w prognozowaniu upadłości firm w analizowanym zbiorze. Błąd II rodzaju na poziomie 99% oznacza, że model niemal całkowicie nie rozpoznaje firm, które przetrwały, błędnie kwalifikując je jako upadające. Choć błąd I rodzaju jest niski (6%), to nie rekompensuje to skrajnie wysokiego ryzyka pomyłki przy ocenie firm zdrowych. W efekcie model nie nadaje się do praktycznego zastosowania w obecnej formie.
+
+# Wniosek
+
+```{r}
+porownanie_modeli <- tibble(
+  Model = c("Altman", "Springate", "Poznański"),
+  Dokładność = c(dokladnosc, dokladnosc_springate, dokladnosc_poznan),
+  Blad_I_rodzaju = c(blad_I_rodzaju, blad_I_rodzaju_springate, blad_I_rodzaju_poznan),
+  Blad_II_rodzaju = c(blad_II_rodzaju, blad_II_rodzaju_springate, blad_II_rodzaju_poznan)
+)
+
+print(porownanie_modeli)
+```
+
+```{r}
+# Dane do wykresu – pivot_longer
+dane_wykres <- porownanie_modeli |> 
+  pivot_longer(cols = -Model, names_to = "Metryka", values_to = "Wartość")
+
+ggplot(dane_wykres, aes(x = Model, y = Wartość * 100, fill = Metryka)) +
+  geom_col(position = "dodge") +
+  labs(title = "Porównanie modeli predykcji upadłości",
+       y = "Wartość (%)",
+       x = "Model",
+       fill = "Metryka") +
+  scale_fill_manual(values = c("Dokładność" = "forestgreen",
+                               "Blad_I_rodzaju" = "firebrick",
+                               "Blad_II_rodzaju" = "darkorange")) +
+  theme_minimal()
+
+```
+
+Na podstawie tabeli porównawczej oraz wykresu trzech modeli predykcji upadłości  można stwierdzić, że żaden z nich nie wykazał się satysfakcjonującą skutecznością klasyfikacyjną na analizowanym zbiorze danych (100 firm upadłych i 100 przetrwałych). Najwyższą dokładność osiągnął model Springate’a (60,5%), jednak przy wysokim błędzie I rodzaju (53%), co oznacza, że często nie rozpoznawał firm rzeczywiście zagrożonych upadłością.Model Altmana wykazał się nieco niższą dokładnością (59,6%), lecz miał niższy błąd I rodzaju (43%), co czyni go relatywnie najbardziej zrównoważonym spośród trzech modeli.Model Poznańskiego, mimo bardzo niskiego błędu I rodzaju (6%), całkowicie zawiódł w rozpoznawaniu firm przetrwałych (błąd II rodzaju wyniósł aż 99%) i osiągnął najniższą ogólną dokładność (47,5%).
+
+Żaden z badanych modeli nie jest w pełni adekwatny do predykcji upadłości firm w oparciu o dostępny zbiór danych.
+
+
+
+# Stworzenie "polskiego" modelu Altmana
+
+Celem niniejszego projektu jest stworzenie polskiego odpowiednika modelu Altmana, który służy do przewidywania bankructwa firm. Aby tego dokonać, wykorzystamy analizę dyskryminacyjną LDA (Linear Discriminant Analysis).
+
+(LDA) to metoda statystyczna, która jest używana do klasyfikacji danych. Działa poprzez znajdowanie liniowych kombinacji cech, które najlepiej oddzielają różne klasy w danych. LDA stara się maksymalizować różnice między klasami, jednocześnie minimalizując zmienność wewnątrz klas. Jest to technika oparta na założeniu, że dane z różnych klas mają podobną macierz kowariancji i są rozkładane zgodnie z rozkładem normalnym.
+
+W naszym przypadku, podobnie jak w poprzednich badaniach, zdecydowaliśmy się na zastosowanie tego samego zestawu danych, który był używany wcześniej. Dodatkowo uznaliśmy, że będziemy używać również tych samych zmiennych,
+
+Porównując nasze wyniki z oryginalnymi, będziemy mogli ocenić, jak dobrze LDA sprawdza się w kontekście przewidywania upadłości w polskich firmach, bazując na podobnym zbiorze zmiennych. Celem jest stworzenie modelu, który będzie odpowiedni do warunków rynkowych w Polsce i może zostać wykorzystany w praktyce do analizy ryzyka bankructwa.
+
+## Sprawdzenie założeń
+
+Na początku projektu, przed przystąpieniem do budowy modelu, przeprowadzimy testy, aby sprawdzić, czy dane spełniają podstawowe założenia dla zastosowania LDA. Będziemy analizować, czy obserwacje są niezależne, czy klasy mają tę samą macierz kowariancji oraz czy zmienne w danych mają rozkład normalny.
+
+### Sprawdzenie normalności
+
+```{r}
+normalnosc_x5 <- shapiro.test(sample(dane$x5, 5000))
+normalnosc_x40 <- shapiro.test(sample(dane$x40, 5000))
+normalnosc_x6  <- shapiro.test(sample(dane$x6, 5000))
+normalnosc_x7  <- shapiro.test(sample(dane$x7, 5000))
+normalnosc_x8  <- shapiro.test(sample(dane$x8, 5000))
+normalnosc_x9  <- shapiro.test(sample(dane$x9, 5000))
+
+p_values <- data.frame(
+  zmienna = c("x40", "x6", "x7", "x8", "x9"),
+  p_value = c(
+    normalnosc_x40$p.value,
+    normalnosc_x6$p.value,
+    normalnosc_x7$p.value,
+    normalnosc_x8$p.value,
+    normalnosc_x9$p.value
+  )
+)
+
+print(p_values)
+
+
+
+```
+
+Wszystkie te zmienne nie spełniają założenia normalności, co może mieć znaczący wpływ na skuteczność LDA. To założenie zdecydowanie nie jest spełnione.
+
+### Sprawdzenie macierzy kowariancji
+
+```{r}
+library(biotools)
+
+# Wybieramy tylko zmienne x40, x6, x7, x8, x9
+zmienne <- dane[, c("x40", "x6", "x7", "x8", "x9")]
+
+# Dodajemy informację o klasie
+klasy <- as.factor(dane[[65]])
+
+# Box's M test
+box_test <- boxM(zmienne, klasy)
+
+# Wyniki
+print(box_test)
+```
+
+Dane nie spełniają założenia homogeniczności macierzy kowariancji, co oznacza, że klasy różnią się pod względem rozproszenia i zależności między zmiennymi. LDA przez to może nie być optymalne oraz jest to kolejne założenie, które nie zostało spełnione.
+
+### Sprawdzennie niezależności
+
+```{r}
+korelacje <- cor(dane[, c("x40", "x6", "x7", "x8", "x9")])
+
+# Wyświetlanie macierzy korelacji
+library(corrplot)
+print(korelacje)
+corrplot(korelacje,"square")
+```
+
+Jak widać, zmienne nie są ze sobą wysoce skorelowane, najwyższa korlacja wynosi 0.37 między zmienną x7, a x9. Oznacza to, że nasze dane są od siebie niezależne.
+
+Chociaż przeprowadzone testy wskazują, że nie wszystkie założenia wymagane do zastosowania analizy LDA zostały spełnione, postanowiliśmy kontynuować badanie, aby sprawdzić, czy metoda może mimo to dać interesujące i użyteczne wyniki.
+
+## LDA
+
+```{r}
+dane_lda <- dane_wybrane
+
+model_lda <- lda(x65 ~ x40 + x6 + x7 + x8 + x9, data = dane_lda)
+
+#summary(model_lda)
+model_lda
+
+# Predykcja klas
+pred_lda <- predict(model_lda)
+
+# Dodajemy do danych
+dokladnosc_lda <- mean(pred_lda$class == dane_lda$x65, na.rm = TRUE)
+
+print(paste("Dokładność modelu LDA:", round(dokladnosc_lda * 100, 2), "%"))
+
+model_lda$scaling #wagi wpspółzmiennych
+
+
+
+```
+
+Model LDA, dla "polskich" danych pokazuje interesujące wyniki. Mimo że założenia dotyczące normalności danych i homogeniczności kowariancji nie zostały w pełni spełnione, model został uruchomiony, a uzyskane wyniki wskazują na stosunkowo niską dokładność predykcji, wynoszącą zaledwie 13%. Mimo to, współczynniki dyskryminantów (waga zmiennych w modelu) są nadal użyteczne, ponieważ wskazują, które zmienne (x40, x6, x7, x8, x9) mają największy wpływ na różnicowanie klas.
+
+## Poszerzone badanie
+
+Postanowliśmy wysunąć czynnik losowy przed nawias i powtórzyć badanie 100 razy, żeby sprawdzić, czy da porównywalne wyniki.
+
+```{r}
+library(MASS)     # lda()
+library(dplyr)    # bind_rows
+library(tibble)   # tibble()
+
+# Puste listy na wyniki
+zbiorcze_dane <- list()
+dokladnosci <- numeric()
+zbiorcze_predykcje <- list()
+zbiorcze_scaling <- list()  # tutaj będą współczynniki LDA
+
+for (i in 1:100) {
+  set.seed(i)
+  
+  firmy_upadle <- dane %>% 
+    filter(x65 == 1) %>% 
+    sample_n(100)
+  
+  firmy_przetrwaly <- dane %>% 
+    filter(x65 == 0) %>% 
+    sample_n(100)
+  
+  dane_lda <- bind_rows(firmy_upadle, firmy_przetrwaly)
+  
+  model_lda <- lda(x65 ~ x40 + x6 + x7 + x8 + x9, data = dane_lda)
+  pred_lda <- predict(model_lda)
+  
+  # Dodanie predykcji do danych
+  dane_lda$iteracja <- i
+  
+  # Obliczanie dokładności
+  dokladnosc_lda <- mean(pred_lda$class == dane_lda$x65, na.rm = TRUE)
+
+      # Zbieranie wyników
+  zbiorcze_dane[[i]] <- dane_lda
+  zbiorcze_predykcje[[i]] <- data.frame(iteracja = i, predykcja = pred_lda$class)
+  dokladnosci[i] <- dokladnosc_lda
+  
+  # Dodanie scaling (dobranych współczynników)
+  scaling_df <- as.data.frame(model_lda$scaling)
+  scaling_df$zmienna <- rownames(scaling_df)
+  scaling_df$iteracja <- i
+  rownames(scaling_df) <- NULL
+  zbiorcze_scaling[[i]] <- scaling_df
+}
+
+# Sklejanie zbiorczych wyników
+tabela_dane <- bind_rows(zbiorcze_dane)
+tabela_predykcje <- bind_rows(zbiorcze_predykcje)
+tabela_dokladnosci <- tibble(iteracja = 1:100, dokladnosc = dokladnosci)
+tabela_scaling <- bind_rows(zbiorcze_scaling)
+
+
+print(tabela_dokladnosci)
+library(dplyr)
+print(paste("Średnia dokładność modelu polskiego wynosi:", round(mean(dokladnosci * 100), 2), "%"))
+
+colnames(tabela_scaling)[1:3] <- c("LD1", "zmienna", "iteracja")
+
+# Zamiana na format szeroki
+tabela_scaling_szeroka <- tabela_scaling %>%
+  pivot_wider(
+    names_from = zmienna,
+    values_from = LD1
+  ) %>%
+  arrange(iteracja)
+
+# Podgląd końcowej tabeli
+print(tabela_scaling_szeroka)
+
+srednie_scaling <- tabela_scaling_szeroka %>%
+  summarise(across(everything(), mean))  # Obliczamy średnie dla wszystkich kolumn
+
+# Przekształcamy do formatu długiego
+srednie_scaling_long <- srednie_scaling %>%
+  pivot_longer(
+    cols = everything(), 
+    names_to = "zmienna", 
+    values_to = "srednia_wartosc"
+  )
+
+# ✅ Podgląd wyników
+print(srednie_scaling_long)
+
+# Tworzymy dane do porównania
+dane_porownanie <- data.frame(
+  Zmienna = c("x40", "x6", "x7", "x8", "x9"),
+  Nasz_model = c(0.125, -0.846, -3.00, -0.0900, 0.0862),
+  Altman_model = c(1.2, 1.4, 3.3, 0.6, 0.99)
+)
+
+# Wyświetlamy tabelę porównawczą
+print(dane_porownanie)
+
+```
+
+## Porównanie wartości zmiennych w "polskim" modelu LDA oraz w modelu Altmana:
+
+W analizie zauważalne są istotne różnice w wartościach wag poszczególnych zmiennych. W modelu Altmana zmienne X40, X6, X7, X8, i X9 mają przypisane specyficzne wagi, które odzwierciedlają ich znaczenie w ocenie ryzyka bankructwa. Dla przykładu, X40 w modelu Altmana, który reprezentuje stosunek aktywów obrotowych do aktywów ogółem, ma wagę 1.20, podczas gdy w naszym modelu LDA waga zmiennej x40 wynosi tylko 0.1250. Możliwe, że struktura aktywów dla polskich danych nie odgrywa tak istotnej roli jak w modelu oryginalnym.
+
+Podobnie waga zmiennej x6, odpowiadającej zyskowi zatrzymanemu w stosunku do aktywów ogółem, w naszym modelu wynosi -0.8460, podczas gdy w modelu Altmana X6 ma wagę 1.40. Odmienny kierunek korelacji sugeruje, że zysk zatrzymany może być niechcianą wartością dla polskich firm. Zmienna x7, reprezentująca stosunek zysku przed spłatą odsetek i podatkiem do aktywów ogółem, jest istotnie obniżona w naszym modelu (-3.0000), w przeciwieństwie do modelu Altmana, gdzie ma wagę 3.30, co jest bardzo zaskakujące. Nasz model sugeruje odwrotny skutek tej zmiennej na szansę ogłoszenia upadłości przez firmę.
+
+Wagi dla zmiennych x8 i x9 również wykazują różnice w obu modelach: w naszym modelu zmienne te mają wagi bliskie zeru (-0.0900 dla x8 oraz 0.0862 dla x9), podczas gdy w modelu Altmana X8 i X9 mają przypisane wagi 0.60 i 0.99, co może wskazywać na większą wagę tych zmiennych w klasyfikacji bankructwa w oryginalnym modelu Altmana.
+
+Zmiany są bardzo istotne i jednym z możliwych wytłumaczeń jest to, że w pierwszej kolejności nie powinniśmy stosować LDA w naszym modelu, gdyż założenia nie są spełnione. Wpływa to znacząco na dokładność modelu, która jest bardzo niska. Dosłownie lepszym wyborem byłoby zgadywać i mielibyśmy szansę na porównywalne lub lepsze wyniki.
